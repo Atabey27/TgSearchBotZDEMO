@@ -91,5 +91,5 @@ async def callback(event):
         await event.edit("ℹ️ Lütfen şu şekilde gönder: `/userinfo @kullaniciadi`", parse_mode='md')
 
 print("🚀 Bot başlatılıyor...")
-client.start()
+client.loop.run_until_complete(client.start(phone='+905052469140'))
 client.run_until_disconnected()
