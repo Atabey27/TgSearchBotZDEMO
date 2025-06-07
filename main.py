@@ -5,8 +5,8 @@ from telethon.tl.functions.users import GetFullUserRequest
 import re
 import asyncio
 
-api_id = 24562058
-api_hash = 'a5562428e856f01ac943de0d29036cde'
+api_id = kendi api id gir
+api_hash = 'kendi api hash gir'
 client = TelegramClient('user_session', api_id, api_hash)
 
 def read_groups():
