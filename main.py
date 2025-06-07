@@ -1,8 +1,9 @@
-from telethon import TelegramClient, events, Button
+from telethon import TelegramClient, events
 from telethon.tl.functions.channels import GetParticipantsRequest
 from telethon.tl.types import ChannelParticipantsSearch
 from telethon.tl.functions.users import GetFullUserRequest
 import re
+import asyncio
 
 api_id = 24562058
 api_hash = 'a5562428e856f01ac943de0d29036cde'
@@ -12,49 +13,66 @@ def read_groups():
     with open('group_usernames.txt', 'r', encoding='utf-8') as f:
         return [line.strip() for line in f if line.strip()]
 
+async def search_in_group(group, query, is_id):
+    try:
+        entity = await client.get_entity(group)
+        offset = 0
+        while True:
+            participants = await client(GetParticipantsRequest(
+                channel=entity,
+                filter=ChannelParticipantsSearch(''),
+                offset=offset,
+                limit=200,
+                hash=0
+            ))
+            users = participants.users
+            if not users:
+                break
+            for u in users:
+                if (is_id and str(u.id) == query) or \
+                   (not is_id and (
+                        (u.username and u.username.lower() == query.lower().lstrip('@')) or
+                        (u.first_name and query.lower() in u.first_name.lower()) or
+                        (u.last_name and query.lower() in u.last_name.lower()) or
+                        (u.first_name and u.last_name and query.lower() in f"{u.first_name} {u.last_name}".lower())
+                   )):
+                    return group, u.username or f"{u.first_name} {u.last_name}".strip() or str(u.id)
+            if len(users) < 200:
+                break
+            offset += len(users)
+            await asyncio.sleep(0.5)
+    except Exception as e:
+        print(f"[HATA] {group} grubunda tarama hatası: {e}")
+        return None
+    return None
+
 async def search_in_groups(query):
     is_id = re.fullmatch(r'\d+', query) is not None
-    group_usernames = read_groups()
-    found = []
+    groups = read_groups()
+    tasks = [search_in_group(group, query, is_id) for group in groups]
+
+    found_groups = []
     display_name = None
+    for task in asyncio.as_completed(tasks):
+        res = await task
+        if res:
+            group, username = res
+            found_groups.append(group)
+            display_name = username
+            # Erken durdurmak istersen buraya break ekleyebilirsin
+            # break
 
-    for group in group_usernames:
-        try:
-            entity = await client.get_entity(group)
-            offset = 0
-            while True:
-                participants = await client(GetParticipantsRequest(
-                    channel=entity,
-                    filter=ChannelParticipantsSearch(''),
-                    offset=offset,
-                    limit=200,
-                    hash=0
-                ))
-                users = participants.users
-                if not users:
-                    break
-                for u in users:
-                    if (is_id and str(u.id) == query) or (not is_id and u.username and u.username.lower() == query.lower().lstrip('@')):
-                        display_name = u.username or str(u.id)
-                        found.append(group)
-                        break
-                if len(users) < 200:
-                    break
-                offset += len(users)
-        except Exception:
-            continue
-
-    return display_name or query, found
+    return display_name or query, found_groups
 
 @client.on(events.NewMessage(pattern=r'^/check\s+(.+)$'))
 async def check_handler(event):
     query = event.pattern_match.group(1).strip()
     username, groups = await search_in_groups(query)
     if groups:
-        msg = f"✅ @{username} şu gruplarda bulundu:\n"
+        msg = f"✅ **{username}** şu gruplarda bulundu:\n"
         msg += '\n'.join(f"- [@{g}](https://t.me/{g})" for g in groups)
     else:
-        msg = f"❌ {query} hiçbir grupta bulunamadı."
+        msg = f"❌ **{username}** hiçbir grupta bulunamadı."
     await event.reply(msg, parse_mode='md')
 
 @client.on(events.NewMessage(pattern=r'^/userinfo\s+(.+)$'))
@@ -70,26 +88,20 @@ async def userinfo_handler(event):
         msg += f"• Bio: {full.full_user.about or 'Yok'}"
     except Exception as e:
         msg = f"❌ Kullanıcı bilgisi alınamadı: {e}"
-
     await event.reply(msg)
 
 @client.on(events.NewMessage(pattern='/start'))
 async def start_handler(event):
-    await event.respond(
-        "Hoş geldin! Aşağıdaki komutlardan birini seç:",
-        buttons=[
-            [Button.inline("🔍 Kullanıcıyı Tara", b"check")],
-            [Button.inline("ℹ️ Kullanıcı Bilgisi", b"info")]
-        ]
+    msg = (
+        "Hoş geldin!\n"
+        "Komutları şu şekilde kullanabilirsin:\n\n"
+        "🔍 Kullanıcıyı gruplarda aramak için:\n"
+        "`/check @kullaniciadi` veya `/check ID`\n\n"
+        "ℹ️ Kullanıcı bilgilerini görmek için:\n"
+        "`/userinfo @kullaniciadi`"
     )
-
-@client.on(events.CallbackQuery)
-async def callback(event):
-    if event.data == b"check":
-        await event.edit("🔍 Lütfen şu şekilde gönder: `/check @kullaniciadi`", parse_mode='md')
-    elif event.data == b"info":
-        await event.edit("ℹ️ Lütfen şu şekilde gönder: `/userinfo @kullaniciadi`", parse_mode='md')
+    await event.respond(msg, parse_mode='md')
 
 print("🚀 Bot başlatılıyor...")
-client.loop.run_until_complete(client.start(phone='+905052469140'))
+client.start()
 client.run_until_disconnected()
